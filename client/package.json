@@ -5,7 +5,8 @@
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
-    "watch": "ng build --watch --configuration development"
+    "watch": "ng build --watch --configuration development",
+    "publish": "node publish.js"
   },
   "private": true,
   "packageManager": "npm@11.6.2",
