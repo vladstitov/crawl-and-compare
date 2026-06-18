@@ -1,3 +1,3 @@
 export declare namespace CromeBrowser {
-    function OpenBrowser(): void;
+    function OpenBrowser(url?: string): void;
 }
