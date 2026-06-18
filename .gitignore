@@ -16,6 +16,7 @@ client/.angular/
 .env.*
 !.env.example
 server/.env
+server/db/
 client/src/environments/environment.*.ts
 !client/src/environments/environment.example.ts
 

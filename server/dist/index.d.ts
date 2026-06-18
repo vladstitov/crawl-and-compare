@@ -1,1 +1,1 @@
-export {};
+import './core/database';
