@@ -1,0 +1,17 @@
+{
+  "name": "chrome-extension-starter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Starter project for building a Chrome extension with TypeScript and esbuild",
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "dev": "node esbuild.mjs --watch",
+    "clean": "node -e \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\""
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.43",
+    "esbuild": "^0.23.1",
+    "typescript": "^5.6.2"
+  }
+}

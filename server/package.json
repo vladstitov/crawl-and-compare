@@ -18,11 +18,13 @@
   "type": "commonjs",
   "dependencies": {
     "@seald-io/nedb": "^4.1.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.3",
+    "@types/ws": "^8.5.13",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
