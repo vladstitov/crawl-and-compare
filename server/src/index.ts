@@ -13,4 +13,4 @@ app.get('/', (req: Request, res: Response) => {
   res.json({ message: 'Server is running!' });
 });
 
-BrowserRepo.StartSocketServer(app, PORT);
+BrowserRepo.StartBridgeServer(app, PORT);

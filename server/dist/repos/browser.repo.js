@@ -1,8 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BrowserRepo = void 0;
-const http_1 = require("http");
-const ws_1 = require("ws");
 var BrowserRepo;
 (function (BrowserRepo) {
     function health() {
@@ -12,60 +10,130 @@ var BrowserRepo;
         };
     }
     BrowserRepo.health = health;
-    function sendJson(socket, data) {
-        socket.send(JSON.stringify(data));
+    function createRequestId() {
+        return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
-    function broadcastJson(bridge, data) {
-        const payload = JSON.stringify(data);
-        bridge.clients.forEach((client) => {
-            if (client.readyState === ws_1.WebSocket.OPEN) {
-                client.send(payload);
+    function StartBridgeServer(app, port) {
+        const pendingCommands = [];
+        const commandWaiters = [];
+        const pendingResults = new Map();
+        function enqueueCommand(command) {
+            const envelope = {
+                type: 'browser:command',
+                requestId: createRequestId(),
+                command
+            };
+            const waitingCommand = commandWaiters.shift();
+            if (waitingCommand) {
+                clearTimeout(waitingCommand.timer);
+                waitingCommand.resolve(envelope);
+                return envelope;
+            }
+            pendingCommands.push(envelope);
+            return envelope;
+        }
+        function waitForNextCommand(waitMs) {
+            const queuedCommand = pendingCommands.shift();
+            if (queuedCommand) {
+                return Promise.resolve(queuedCommand);
+            }
+            return new Promise((resolve) => {
+                const timer = setTimeout(() => {
+                    const index = commandWaiters.findIndex((waiter) => waiter.timer === timer);
+                    if (index >= 0) {
+                        commandWaiters.splice(index, 1);
+                    }
+                    resolve(null);
+                }, waitMs);
+                commandWaiters.push({ resolve, timer });
+            });
+        }
+        function waitForResult(requestId, timeoutMs = 30000) {
+            return new Promise((resolve, reject) => {
+                const timer = setTimeout(() => {
+                    pendingResults.delete(requestId);
+                    reject(new Error(`Timed out waiting for ${requestId} to finish.`));
+                }, timeoutMs);
+                pendingResults.set(requestId, { resolve, reject, timer });
+            });
+        }
+        function resolveResult(result) {
+            const pending = pendingResults.get(result.requestId);
+            if (!pending) {
+                return;
+            }
+            clearTimeout(pending.timer);
+            pendingResults.delete(result.requestId);
+            pending.resolve(result);
+        }
+        app.post('/bridge/command', async (req, res) => {
+            const command = req.body;
+            if (!command?.action) {
+                res.status(400).json({ ok: false, message: 'Missing command action.' });
+                return;
+            }
+            const envelope = enqueueCommand(command);
+            const resultPromise = waitForResult(envelope.requestId);
+            try {
+                const result = await resultPromise;
+                res.json(result);
+            }
+            catch (error) {
+                res.status(504).json({
+                    ok: false,
+                    message: error instanceof Error ? error.message : 'Command timed out.'
+                });
             }
         });
-    }
-    function StartSocketServer(app, port) {
-        const server = (0, http_1.createServer)(app);
-        const bridge = new ws_1.WebSocketServer({ server, path: '/bridge' });
-        bridge.on('connection', (socket) => {
-            sendJson(socket, {
-                type: 'bridge:welcome',
-                at: new Date().toISOString(),
-                clients: bridge.clients.size
-            });
-            socket.on('message', (raw) => {
-                const text = raw.toString();
-                console.log('Received message from bridge client:', text);
-                let message;
-                try {
-                    message = JSON.parse(text);
-                }
-                catch {
-                    sendJson(socket, {
-                        type: 'bridge:error',
-                        error: 'Invalid JSON message received.'
-                    });
+        app.get('/bridge/command/next', (req, res) => {
+            const waitMs = Number(req.query.waitMs ?? 30000);
+            waitForNextCommand(Number.isFinite(waitMs) && waitMs > 0 ? waitMs : 30000)
+                .then((command) => {
+                if (!command) {
+                    res.status(204).end();
                     return;
                 }
-                broadcastJson(bridge, {
-                    type: 'bridge:message',
-                    at: new Date().toISOString(),
-                    payload: message
+                res.json(command);
+            })
+                .catch((error) => {
+                res.status(500).json({
+                    ok: false,
+                    message: error instanceof Error ? error.message : 'Failed to fetch next command.'
                 });
             });
         });
-        app.post('/bridge/publish', (req, res) => {
-            broadcastJson(bridge, {
-                type: 'bridge:message',
+        app.post('/bridge/result', (req, res) => {
+            const result = req.body;
+            if (!result?.requestId || !result.action) {
+                res.status(400).json({ ok: false, message: 'Missing command result fields.' });
+                return;
+            }
+            resolveResult(result);
+            res.json({ ok: true });
+        });
+        app.post('/bridge/event', (req, res) => {
+            const event = {
+                type: 'bridge:event',
                 at: new Date().toISOString(),
                 payload: req.body
-            });
-            res.json({ ok: true, recipients: bridge.clients.size });
+            };
+            console.log('Received bridge event:', event);
+            res.json({ ok: true });
         });
-        server.listen(port, () => {
+        app.post('/bridge/publish', (req, res) => {
+            const event = {
+                type: 'bridge:event',
+                at: new Date().toISOString(),
+                payload: req.body
+            };
+            console.log('Received bridge publish:', event);
+            res.json({ ok: true });
+        });
+        app.listen(port, () => {
             console.log(`Server is running on http://localhost:${port}`);
-            console.log(`Bridge websocket is running on ws://localhost:${port}/bridge`);
+            console.log(`Bridge HTTP endpoints are running on http://localhost:${port}/bridge`);
         });
     }
-    BrowserRepo.StartSocketServer = StartSocketServer;
+    BrowserRepo.StartBridgeServer = StartBridgeServer;
 })(BrowserRepo || (exports.BrowserRepo = BrowserRepo = {}));
 //# sourceMappingURL=browser.repo.js.map

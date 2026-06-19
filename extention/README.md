@@ -32,18 +32,19 @@ Run `npm run dev`, then reload the unpacked extension in Chrome after changes.
 
 ## Server bridge
 
-This extension now opens a WebSocket bridge to `ws://localhost:3000/bridge` from the background service worker.
+This extension now uses HTTP against `http://localhost:3000/bridge` from the background service worker.
 
 1. Start the server project in a separate terminal from `server/`:
-    - `npm install`
-    - `npm run dev`
+   - `npm install`
+   - `npm run dev`
 2. Build this extension and load `dist/` in Chrome.
-3. Open the extension popup and use **Send To Bridge** to publish a message.
+3. Send browser commands from the server with `POST /bridge/command`.
+4. The extension long-polls `GET /bridge/command/next` and posts results back to `POST /bridge/result`.
 
-You can also broadcast from the server with HTTP:
+Example command:
 
 ```bash
-curl -X POST http://localhost:3000/bridge/publish \
-   -H "Content-Type: application/json" \
-   -d '{"text":"hello from server"}'
+curl -X POST http://localhost:3000/bridge/command \
+  -H "Content-Type: application/json" \
+  -d '{"action":"grabHtmlBody"}'
 ```
