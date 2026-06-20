@@ -32,19 +32,12 @@ Run `npm run dev`, then reload the unpacked extension in Chrome after changes.
 
 ## Server bridge
 
-This extension now uses HTTP against `http://localhost:3000/bridge` from the background service worker.
+This extension now uses a WebSocket command bridge at `ws://localhost:8080` and uploads scraped HTML to `http://localhost:3000/api/upload-html`.
 
 1. Start the server project in a separate terminal from `server/`:
    - `npm install`
    - `npm run dev`
 2. Build this extension and load `dist/` in Chrome.
-3. Send browser commands from the server with `POST /bridge/command`.
-4. The extension long-polls `GET /bridge/command/next` and posts results back to `POST /bridge/result`.
-
-Example command:
-
-```bash
-curl -X POST http://localhost:3000/bridge/command \
-  -H "Content-Type: application/json" \
-  -d '{"action":"grabHtmlBody"}'
-```
+3. The background service worker connects to `ws://localhost:8080` automatically.
+4. The server can push `NAVIGATE`, `SCRAPE_PAGE`, and `CLICK_ELEMENT` commands over that socket.
+5. When the extension scrapes the current page, it posts `{ url, html }` to `POST /api/upload-html`.

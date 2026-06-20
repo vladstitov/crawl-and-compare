@@ -1,43 +1,21 @@
 import { Express, Request, Response } from 'express';
+import { WebSocketServer, WebSocket } from 'ws';
 
 export namespace BrowserRepo {
-  export type BrowserCommandAction =
-    | 'goToUrl'
-    | 'grabHtmlBody'
-    | 'clickElement'
-    | 'getElementContent';
+  export type BrowserCommandName = 'NAVIGATE' | 'SCRAPE_PAGE' | 'CLICK_ELEMENT';
 
-  export type BrowserCommandRequest = {
-    action: BrowserCommandAction;
+  export type BrowserCommand = {
+    command: BrowserCommandName;
     url?: string;
     selector?: string;
-    tabId?: number;
     waitForLoad?: boolean;
   };
 
-  export type BridgePayload = {
-    [key: string]: unknown;
-  };
-
-  export type BridgeCommandEnvelope = {
-    type: 'browser:command';
-    requestId: string;
-    command: BrowserCommandRequest;
-  };
-
-  export type BridgeCommandResult = {
-    type: 'browser:result';
-    requestId: string;
-    action: BrowserCommandAction;
+  export type ExtensionResponse = {
     ok: boolean;
-    data?: unknown;
+    command?: BrowserCommandName;
     error?: string;
-  };
-
-  export type BridgeEventEnvelope = {
-    type: 'bridge:event';
-    at: string;
-    payload: unknown;
+    data?: unknown;
   };
 
   export type BridgeResponse = {
@@ -46,171 +24,106 @@ export namespace BrowserRepo {
     data?: unknown;
   };
 
+  type UploadedHtmlPayload = {
+    url: string;
+    html: string;
+  };
+
+  let extensionSocket: WebSocket | null = null;
+  let webSocketServer: WebSocketServer | null = null;
+
   export function health(): BridgeResponse {
     return {
       ok: true,
-      message: 'Browser repo namespace is ready.'
+      message: extensionSocket?.readyState === WebSocket.OPEN ? 'Extension connected.' : 'Waiting for extension connection.'
     };
   }
 
-  function createRequestId(): string {
-    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  function sendCommand(command: BrowserCommand): BridgeResponse {
+    if (!extensionSocket || extensionSocket.readyState !== WebSocket.OPEN) {
+      return {
+        ok: false,
+        message: 'No extension connected via WebSocket.'
+      };
+    }
+
+    extensionSocket.send(JSON.stringify(command));
+    return {
+      ok: true,
+      message: `Sent ${command.command} command to extension.`
+    };
   }
 
-  export function StartBridgeServer(app: Express, port: number): void {
-    const pendingCommands: BridgeCommandEnvelope[] = [];
-    const commandWaiters: Array<{
-      resolve: (value: BridgeCommandEnvelope | null) => void;
-      timer: ReturnType<typeof setTimeout>;
-    }> = [];
-    const pendingResults = new Map<
-      string,
-      {
-        resolve: (value: BridgeCommandResult) => void;
-        reject: (reason?: unknown) => void;
-        timer: ReturnType<typeof setTimeout>;
-      }
-    >();
+  export function goToUrl(url: string): BridgeResponse {
+    return sendCommand({ command: 'NAVIGATE', url, waitForLoad: true });
+  }
 
-    function enqueueCommand(command: BrowserCommandRequest): BridgeCommandEnvelope {
-      const envelope: BridgeCommandEnvelope = {
-        type: 'browser:command',
-        requestId: createRequestId(),
-        command
-      };
+  export function grabHtmlBody(): BridgeResponse {
+    return sendCommand({ command: 'SCRAPE_PAGE' });
+  }
 
-      const waitingCommand = commandWaiters.shift();
-      if (waitingCommand) {
-        clearTimeout(waitingCommand.timer);
-        waitingCommand.resolve(envelope);
-        return envelope;
-      }
+  export function clickElement(selector: string): BridgeResponse {
+    return sendCommand({ command: 'CLICK_ELEMENT', selector });
+  }
 
-      pendingCommands.push(envelope);
-      return envelope;
+  export function getElementContent(selector: string): BridgeResponse {
+    return {
+      ok: false,
+      message: `Unsupported simplified command: getElementContent for selector ${selector}.`
+    };
+  }
+
+
+  function analyzeAndProceed(url: string, _html: string): void {
+    if (url.includes('/in/')) {
+      console.log('Target profile HTML received. Ready for analysis.');
+      return;
     }
 
-    function waitForNextCommand(waitMs: number): Promise<BridgeCommandEnvelope | null> {
-      const queuedCommand = pendingCommands.shift();
-      if (queuedCommand) {
-        return Promise.resolve(queuedCommand);
-      }
+    const response = sendCommand({
+      command: 'CLICK_ELEMENT',
+      selector: "button[aria-label*='About']"
+    });
 
-      return new Promise<BridgeCommandEnvelope | null>((resolve) => {
-        const timer = setTimeout(() => {
-          const index = commandWaiters.findIndex((waiter) => waiter.timer === timer);
-          if (index >= 0) {
-            commandWaiters.splice(index, 1);
+    if (!response.ok) {
+      console.error(response.message);
+    }
+  }
+
+  export function StartBridgeServer(app: Express, PORT: number): void {
+    app.post('/api/upload-html', (req: Request, res: Response) => {
+      const { url, html } = req.body as UploadedHtmlPayload;
+
+      console.log(`Received HTML from: ${url} (${(html.length / 1024).toFixed(2)} KB)`);
+      analyzeAndProceed(url, html);
+      res.json({ status: 'processing' });
+    });
+  console.log(`HTML upload endpoint on http://localhost:${PORT}/api/upload-html`);
+    if (!webSocketServer) {
+      webSocketServer = new WebSocketServer({ port: 8080 });
+        console.log('WebSocket command bridge  on ws://localhost:8080');
+
+      webSocketServer.on('connection', (socket) => {
+        console.log('Extension connected via WebSocket.');
+        extensionSocket = socket;
+
+        socket.on('message', (message) => {
+          try {
+            const response = JSON.parse(message.toString()) as ExtensionResponse;
+            console.log('Extension response:', response);
+          } catch {
+            console.log('Extension sent a non-JSON message:', message.toString());
+          }
+        });
+
+        socket.on('close', () => {
+          if (extensionSocket === socket) {
+            extensionSocket = null;
           }
 
-          resolve(null);
-        }, waitMs);
-
-        commandWaiters.push({ resolve, timer });
+          console.log('Extension WebSocket disconnected.');
+        });
       });
     }
-
-    function waitForResult(requestId: string, timeoutMs = 30000): Promise<BridgeCommandResult> {
-      return new Promise<BridgeCommandResult>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pendingResults.delete(requestId);
-          reject(new Error(`Timed out waiting for ${requestId} to finish.`));
-        }, timeoutMs);
-
-        pendingResults.set(requestId, { resolve, reject, timer });
-      });
-    }
-
-    function resolveResult(result: BridgeCommandResult): void {
-      const pending = pendingResults.get(result.requestId);
-      if (!pending) {
-        return;
-      }
-
-      clearTimeout(pending.timer);
-      pendingResults.delete(result.requestId);
-      pending.resolve(result);
-    }
-
-    app.post('/bridge/command', async (req: Request, res: Response) => {
-      const command = req.body as BrowserCommandRequest;
-
-      if (!command?.action) {
-        res.status(400).json({ ok: false, message: 'Missing command action.' });
-        return;
-      }
-
-      const envelope = enqueueCommand(command);
-      const resultPromise = waitForResult(envelope.requestId);
-
-      try {
-        const result = await resultPromise;
-        res.json(result);
-      } catch (error) {
-        res.status(504).json({
-          ok: false,
-          message: error instanceof Error ? error.message : 'Command timed out.'
-        });
-      }
-    });
-
-    app.get('/bridge/command/next', (req: Request, res: Response) => {
-      const waitMs = Number(req.query.waitMs ?? 30000);
-
-      waitForNextCommand(Number.isFinite(waitMs) && waitMs > 0 ? waitMs : 30000)
-        .then((command) => {
-          if (!command) {
-            res.status(204).end();
-            return;
-          }
-
-          res.json(command);
-        })
-        .catch((error) => {
-          res.status(500).json({
-            ok: false,
-            message: error instanceof Error ? error.message : 'Failed to fetch next command.'
-          });
-        });
-    });
-
-    app.post('/bridge/result', (req: Request, res: Response) => {
-      const result = req.body as BridgeCommandResult;
-
-      if (!result?.requestId || !result.action) {
-        res.status(400).json({ ok: false, message: 'Missing command result fields.' });
-        return;
-      }
-
-      resolveResult(result);
-      res.json({ ok: true });
-    });
-
-    app.post('/bridge/event', (req: Request, res: Response) => {
-      const event = {
-        type: 'bridge:event',
-        at: new Date().toISOString(),
-        payload: req.body
-      } satisfies BridgeEventEnvelope;
-
-      console.log('Received bridge event:', event);
-      res.json({ ok: true });
-    });
-
-    app.post('/bridge/publish', (req: Request, res: Response) => {
-      const event = {
-        type: 'bridge:event',
-        at: new Date().toISOString(),
-        payload: req.body
-      } satisfies BridgeEventEnvelope;
-
-      console.log('Received bridge publish:', event);
-      res.json({ ok: true });
-    });
-
-    app.listen(port, () => {
-      console.log(`Server is running on http://localhost:${port}`);
-      console.log(`Bridge HTTP endpoints are running on http://localhost:${port}/bridge`);
-    });
   }
 }

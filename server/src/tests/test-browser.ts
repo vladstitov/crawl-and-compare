@@ -1,8 +1,13 @@
-import { CromeBrowser } from '../repos/chrome-browser';
 
-function runBrowserTest(): void {
-  CromeBrowser.OpenBrowser('https://ca.indeed.com/');
 
+import { BrowserRepo } from '../repos/browser.repo';
+
+async function runBrowserTest(): Promise<void> {
+  console.log('Sending goToUrl command to extension...');
+
+  const result = await BrowserRepo.goToUrl('https://ca.indeed.com/');
+
+  console.log('Result:', result);
 }
 
-runBrowserTest();
+runBrowserTest().catch(console.error);

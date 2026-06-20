@@ -11,6 +11,9 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://localhost:3000 http://127.0.0.1:3000 ws://localhost:8080 ws://127.0.0.1:8080"
+  },
   "permissions": ["tabs"],
   "host_permissions": ["http://localhost:3000/*", "http://127.0.0.1:3000/*", "<all_urls>"],
   "content_scripts": [

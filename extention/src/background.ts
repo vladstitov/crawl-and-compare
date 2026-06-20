@@ -1,35 +1,40 @@
-const BRIDGE_BASE_URL = 'http://localhost:3000';
+const API_BASE_URL = 'http://localhost:3000';
+const BRIDGE_WS_URL = 'ws://localhost:8080';
 
 type BridgeStatus = 'disconnected' | 'connecting' | 'connected';
 
-type BrowserCommandAction = 'goToUrl' | 'grabHtmlBody' | 'clickElement' | 'getElementContent';
+type BrowserSocketCommandName = 'NAVIGATE' | 'SCRAPE_PAGE' | 'CLICK_ELEMENT';
 
-type BrowserCommandRequest = {
-  action: BrowserCommandAction;
+type BrowserCommandAction = 'grabHtmlBody' | 'clickElement' | 'getElementContent';
+
+type BrowserSocketCommand = {
+  command: BrowserSocketCommandName;
   url?: string;
   selector?: string;
-  tabId?: number;
   waitForLoad?: boolean;
 };
 
-type BrowserCommandEnvelope = {
-  type: 'browser:command';
-  requestId: string;
-  command: BrowserCommandRequest;
+type BrowserCommandRequest = {
+  action: BrowserCommandAction;
+  selector?: string;
 };
 
-type BrowserCommandResult = {
-  type: 'browser:result';
-  requestId: string;
-  action: BrowserCommandAction;
+type BrowserUploadPayload = {
+  url: string;
+  html: string;
+};
+
+type ExtensionSocketResponse = {
   ok: boolean;
+  command?: BrowserSocketCommandName;
   data?: unknown;
   error?: string;
 };
 
 let bridgeStatus: BridgeStatus = 'disconnected';
 let lastError = '';
-let pollingStarted = false;
+let bridgeSocket: WebSocket | null = null;
+let reconnectTimer: number | null = null;
 
 function setStatus(next: BridgeStatus, error = ''): void {
   bridgeStatus = next;
@@ -46,13 +51,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isBrowserCommandEnvelope(message: unknown): message is BrowserCommandEnvelope {
+function isBrowserSocketCommand(message: unknown): message is BrowserSocketCommand {
   return (
     isRecord(message) &&
-    message.type === 'browser:command' &&
-    typeof message.requestId === 'string' &&
-    isRecord(message.command) &&
-    typeof message.command.action === 'string'
+    typeof message.command === 'string' &&
+    ['NAVIGATE', 'SCRAPE_PAGE', 'CLICK_ELEMENT'].includes(message.command)
   );
 }
 
@@ -61,7 +64,7 @@ function createRequestId(): string {
 }
 
 async function postJson(path: string, body: unknown): Promise<void> {
-  const response = await fetch(`${BRIDGE_BASE_URL}${path}`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
@@ -74,30 +77,7 @@ async function postJson(path: string, body: unknown): Promise<void> {
   }
 }
 
-async function getNextCommand(waitMs = 30000): Promise<BrowserCommandEnvelope | null> {
-  const response = await fetch(`${BRIDGE_BASE_URL}/bridge/command/next?waitMs=${waitMs}`);
-
-  if (response.status === 204) {
-    return null;
-  }
-
-  if (!response.ok) {
-    throw new Error(`GET /bridge/command/next failed with ${response.status}`);
-  }
-
-  const message = (await response.json()) as unknown;
-  if (isBrowserCommandEnvelope(message)) {
-    return message;
-  }
-
-  throw new Error('Server returned an invalid browser command envelope.');
-}
-
-async function getTargetTabId(requestedTabId?: number): Promise<number> {
-  if (typeof requestedTabId === 'number') {
-    return requestedTabId;
-  }
-
+async function getTargetTabId(): Promise<number> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (typeof tab?.id === 'number') {
     return tab.id;
@@ -129,7 +109,11 @@ function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<void> {
   });
 }
 
-async function sendDomCommand(tabId: number, requestId: string, command: BrowserCommandRequest): Promise<BrowserCommandResult> {
+async function sendDomCommand(
+  tabId: number,
+  requestId: string,
+  command: BrowserCommandRequest
+): Promise<ExtensionSocketResponse & { requestId: string; action: BrowserCommandAction }> {
   const response = await chrome.tabs.sendMessage(tabId, {
     type: 'BROWSER_DOM_COMMAND',
     requestId,
@@ -137,22 +121,58 @@ async function sendDomCommand(tabId: number, requestId: string, command: Browser
   });
 
   if (isRecord(response) && typeof response.requestId === 'string') {
-    return response as BrowserCommandResult;
+    return response as ExtensionSocketResponse & { requestId: string; action: BrowserCommandAction };
   }
 
   throw new Error('Content script returned an invalid response.');
 }
 
-async function executeBrowserCommand(envelope: BrowserCommandEnvelope): Promise<BrowserCommandResult> {
-  const { command, requestId } = envelope;
+function sendSocketPayload(payload: unknown): void {
+  if (!bridgeSocket || bridgeSocket.readyState !== WebSocket.OPEN) {
+    throw new Error('No WebSocket connection to the server.');
+  }
 
+  bridgeSocket.send(JSON.stringify(payload));
+}
+
+async function uploadHtml(payload: BrowserUploadPayload): Promise<void> {
+  await postJson('/api/upload-html', payload);
+}
+
+async function scrapeActiveTab(tabId: number): Promise<ExtensionSocketResponse> {
+  const result = await sendDomCommand(tabId, createRequestId(), { action: 'grabHtmlBody' });
+
+  if (!result.ok) {
+    throw new Error(result.error ?? 'Failed to capture HTML.');
+  }
+
+  if (!isRecord(result.data) || typeof result.data.url !== 'string' || typeof result.data.html !== 'string') {
+    throw new Error('Content script returned an invalid HTML payload.');
+  }
+
+  await uploadHtml({
+    url: result.data.url,
+    html: result.data.html
+  });
+
+  return {
+    ok: true,
+    command: 'SCRAPE_PAGE',
+    data: {
+      url: result.data.url,
+      title: typeof result.data.title === 'string' ? result.data.title : ''
+    }
+  };
+}
+
+async function executeBrowserCommand(command: BrowserSocketCommand): Promise<ExtensionSocketResponse> {
   try {
-    if (command.action === 'goToUrl') {
+    if (command.command === 'NAVIGATE') {
       if (!command.url) {
-        throw new Error('The goToUrl command requires a url.');
+        throw new Error('The NAVIGATE command requires a url.');
       }
 
-      const targetTabId = await getTargetTabId(command.tabId);
+      const targetTabId = await getTargetTabId();
       const loadWait = command.waitForLoad !== false ? waitForTabLoad(targetTabId) : undefined;
       await chrome.tabs.update(targetTabId, { url: command.url });
 
@@ -161,10 +181,8 @@ async function executeBrowserCommand(envelope: BrowserCommandEnvelope): Promise<
       }
 
       return {
-        type: 'browser:result',
-        requestId,
-        action: command.action,
         ok: true,
+        command: command.command,
         data: {
           tabId: targetTabId,
           url: command.url
@@ -172,78 +190,145 @@ async function executeBrowserCommand(envelope: BrowserCommandEnvelope): Promise<
       };
     }
 
-    const targetTabId = await getTargetTabId(command.tabId);
-    const contentResult = await sendDomCommand(targetTabId, requestId, command);
+    const targetTabId = await getTargetTabId();
+
+    if (command.command === 'SCRAPE_PAGE') {
+      return await scrapeActiveTab(targetTabId);
+    }
+
+    if (!command.selector) {
+      throw new Error('The CLICK_ELEMENT command requires a selector.');
+    }
+
+    const contentResult = await sendDomCommand(targetTabId, createRequestId(), {
+      action: 'clickElement',
+      selector: command.selector
+    });
+
+    if (!contentResult.ok) {
+      throw new Error(contentResult.error ?? 'The click command failed.');
+    }
+
+    if (command.waitForLoad) {
+      await waitForTabLoad(targetTabId);
+    }
 
     return {
-      type: 'browser:result',
-      requestId,
-      action: contentResult.action,
-      ok: contentResult.ok,
-      data: contentResult.data,
-      error: contentResult.error
+      ok: true,
+      command: command.command,
+      data: contentResult.data
     };
   } catch (error) {
     return {
-      type: 'browser:result',
-      requestId,
-      action: command.action,
       ok: false,
+      command: command.command,
       error: error instanceof Error ? error.message : 'Command failed.'
     };
   }
 }
 
-async function reportGenericEvent(payload: unknown): Promise<void> {
-  await postJson('/bridge/event', {
-    source: 'extension',
-    at: new Date().toISOString(),
-    payload
-  });
-}
-
-async function pollBridgeCommands(): Promise<void> {
-  if (pollingStarted) {
+function scheduleReconnect(): void {
+  if (reconnectTimer !== null) {
     return;
   }
 
-  pollingStarted = true;
+  reconnectTimer = self.setTimeout(() => {
+    reconnectTimer = null;
+    connectBridge();
+  }, 1500);
+}
+
+function connectBridge(): void {
+  if (bridgeSocket && (bridgeSocket.readyState === WebSocket.OPEN || bridgeSocket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
   setStatus('connecting');
   sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
 
-  while (true) {
+  const socket = new WebSocket(BRIDGE_WS_URL);
+  bridgeSocket = socket;
+
+  socket.addEventListener('open', () => {
+    setStatus('connected');
+    sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
+  });
+
+  socket.addEventListener('message', (event) => {
     try {
-      const command = await getNextCommand();
-
-      setStatus('connected');
-      sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
-
-      if (!command) {
-        continue;
+      const parsed = JSON.parse(typeof event.data === 'string' ? event.data : '');
+      if (!isBrowserSocketCommand(parsed)) {
+        throw new Error('Server sent an invalid browser command.');
       }
 
-      const result = await executeBrowserCommand(command);
+      void executeBrowserCommand(parsed)
+        .then((result) => {
+          sendSocketPayload({
+            source: 'extension',
+            at: new Date().toISOString(),
+            ...result
+          });
+          sendRuntimeMessage({ type: 'BRIDGE_MESSAGE', payload: result });
+        })
+        .catch((error) => {
+          const failure = {
+            ok: false,
+            command: parsed.command,
+            error: error instanceof Error ? error.message : 'Command failed.'
+          } satisfies ExtensionSocketResponse;
 
-      await postJson('/bridge/result', result);
-      sendRuntimeMessage({
-        type: 'BRIDGE_MESSAGE',
-        payload: result
-      });
+          sendSocketPayload({
+            source: 'extension',
+            at: new Date().toISOString(),
+            ...failure
+          });
+          sendRuntimeMessage({ type: 'BRIDGE_MESSAGE', payload: failure });
+        });
     } catch (error) {
-      setStatus('disconnected', error instanceof Error ? error.message : 'Bridge polling failed.');
-      sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
-
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const message = error instanceof Error ? error.message : 'Invalid WebSocket message.';
+      sendRuntimeMessage({ type: 'BRIDGE_MESSAGE', payload: message });
     }
+  });
+
+  socket.addEventListener('close', () => {
+    if (bridgeSocket === socket) {
+      bridgeSocket = null;
+    }
+
+    setStatus('disconnected', 'WebSocket disconnected.');
+    sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
+    scheduleReconnect();
+  });
+
+  socket.addEventListener('error', () => {
+    setStatus('disconnected', 'WebSocket connection failed.');
+    sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
+  });
+}
+
+function postPopupEvent(payload: unknown): ExtensionSocketResponse {
+  try {
+    sendSocketPayload({
+      source: 'popup',
+      at: new Date().toISOString(),
+      payload
+    });
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Failed to send popup event.'
+    };
   }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  void pollBridgeCommands();
+  connectBridge();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void pollBridgeCommands();
+  connectBridge();
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -253,25 +338,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === 'BRIDGE_SEND') {
-    void reportGenericEvent({
-      source: 'popup',
-      at: new Date().toISOString(),
-      payload: message.payload ?? null
-    })
-      .then(() => {
-        sendResponse({ ok: true });
-      })
-      .catch((error) => {
-        sendResponse({
-          ok: false,
-          error: error instanceof Error ? error.message : 'Bridge event failed.'
-        });
-      });
-
-    return true;
+    sendResponse(postPopupEvent(message.payload ?? null));
+    return;
   }
 });
 
-void pollBridgeCommands();
+connectBridge();
 
 export {};

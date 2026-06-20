@@ -14,5 +14,9 @@ app.use(express_1.default.static(path_1.default.join(__dirname, '..', 'public'))
 app.get('/', (req, res) => {
     res.json({ message: 'Server is running!' });
 });
-browser_repo_1.BrowserRepo.StartBridgeServer(app, PORT);
-//# sourceMappingURL=index.js.map
+browser_repo_1.BrowserRepo.StartBridgeServer(app);
+app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+    browser_repo_1.BrowserRepo.logBridgeStatus(PORT);
+});
+//# sourceMappingURL=server.js.map

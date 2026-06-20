@@ -14,3 +14,8 @@ app.get('/', (req: Request, res: Response) => {
 });
 
 BrowserRepo.StartBridgeServer(app, PORT);
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+
+});

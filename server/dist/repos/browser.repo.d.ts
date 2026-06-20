@@ -1,33 +1,17 @@
 import { Express } from 'express';
 export declare namespace BrowserRepo {
-    type BrowserCommandAction = 'goToUrl' | 'grabHtmlBody' | 'clickElement' | 'getElementContent';
-    type BrowserCommandRequest = {
-        action: BrowserCommandAction;
+    type BrowserCommandName = 'NAVIGATE' | 'SCRAPE_PAGE' | 'CLICK_ELEMENT';
+    type BrowserCommand = {
+        command: BrowserCommandName;
         url?: string;
         selector?: string;
-        tabId?: number;
         waitForLoad?: boolean;
     };
-    type BridgePayload = {
-        [key: string]: unknown;
-    };
-    type BridgeCommandEnvelope = {
-        type: 'browser:command';
-        requestId: string;
-        command: BrowserCommandRequest;
-    };
-    type BridgeCommandResult = {
-        type: 'browser:result';
-        requestId: string;
-        action: BrowserCommandAction;
+    type ExtensionResponse = {
         ok: boolean;
-        data?: unknown;
+        command?: BrowserCommandName;
         error?: string;
-    };
-    type BridgeEventEnvelope = {
-        type: 'bridge:event';
-        at: string;
-        payload: unknown;
+        data?: unknown;
     };
     type BridgeResponse = {
         ok: boolean;
@@ -35,5 +19,10 @@ export declare namespace BrowserRepo {
         data?: unknown;
     };
     function health(): BridgeResponse;
-    function StartBridgeServer(app: Express, port: number): void;
+    function goToUrl(url: string): BridgeResponse;
+    function grabHtmlBody(): BridgeResponse;
+    function clickElement(selector: string): BridgeResponse;
+    function getElementContent(selector: string): BridgeResponse;
+    function logBridgeStatus(port: number): void;
+    function StartBridgeServer(app: Express): void;
 }
