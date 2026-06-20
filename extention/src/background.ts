@@ -1,6 +1,7 @@
 import type {
   ClickElementCommand,
   ContentScriptCommand,
+  EventLog,
   ExtensionCommand,
   ExtensionSocketResponse,
   NavigateCommand,
@@ -9,6 +10,7 @@ import type {
 
 const API_BASE_URL = 'http://localhost:3000';
 const BRIDGE_WS_URL = 'ws://localhost:8080';
+const HEARTBEAT_INTERVAL_MS = 15000;
 
 type BridgeStatus = 'disconnected' | 'connecting' | 'connected';
 
@@ -24,6 +26,7 @@ let bridgeStatus: BridgeStatus = 'disconnected';
 let lastError = '';
 let bridgeSocket: WebSocket | null = null;
 let reconnectTimer: number | null = null;
+let heartbeatTimer: number | null = null;
 
 function setStatus(next: BridgeStatus, error = ''): void {
   bridgeStatus = next;
@@ -75,12 +78,42 @@ async function sendContentCommand(tabId: number, command: ContentScriptCommand):
   return chrome.tabs.sendMessage(tabId, command);
 }
 
-function sendSocketPayload(payload: unknown): void {
+function sendSocketPayload(payload: any): void {
   if (!bridgeSocket || bridgeSocket.readyState !== WebSocket.OPEN) {
     throw new Error('No WebSocket connection to the server.');
   }
 
   bridgeSocket.send(JSON.stringify(payload));
+}
+
+function sendEventLog(log: EventLog): void {
+  try {
+    sendSocketPayload(log);
+  } catch {
+    // Event logging should never interrupt command handling.
+  }
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer !== null) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+function startHeartbeat(): void {
+  stopHeartbeat();
+
+  heartbeatTimer = self.setInterval(() => {
+    try {
+      sendSocketPayload({
+        type: 'HEARTBEAT',
+        timestamp: Date.now()
+      });
+    } catch {
+      // Ignore failed heartbeats; reconnect flow handles broken sockets.
+    }
+  }, HEARTBEAT_INTERVAL_MS);
 }
 
 
@@ -113,6 +146,7 @@ function connectBridge(): void {
   socket.addEventListener('open', () => {
     setStatus('connected');
     sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
+    startHeartbeat();
   });
 
   socket.addEventListener('message', async (event: MessageEvent<string>) => {
@@ -129,6 +163,16 @@ function connectBridge(): void {
 
     try {
       parsed = JSON.parse(typeof event.data === 'string' ? event.data : '') as Record<string, unknown>;
+
+      if (typeof parsed.command === 'string') {
+        if (parsed.command === 'NAVIGATE' || parsed.command === 'SCRAPE_PAGE' || parsed.command === 'CLICK_ELEMENT') {
+          sendEventLog({
+            from: 'background',
+            message: parsed.command,
+            timestamp: Date.now()
+          });
+        }
+      }
 
       switch (parsed.command) {
         case 'NAVIGATE': {
@@ -232,18 +276,25 @@ function connectBridge(): void {
     }
   });
 
-  socket.addEventListener('close', () => {
+  socket.addEventListener('close', (event) => {
+    stopHeartbeat();
+
     if (bridgeSocket === socket) {
       bridgeSocket = null;
     }
 
-    setStatus('disconnected', 'WebSocket disconnected.');
+    const reason = event.reason ? ` (${event.reason})` : '';
+    const message = `WebSocket disconnected (code ${event.code}).${reason}`;
+    setStatus('disconnected', message);
+    console.log(message);
     sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
     scheduleReconnect();
   });
 
-  socket.addEventListener('error', () => {
+  socket.addEventListener('error', (event) => {
+    stopHeartbeat();
     setStatus('disconnected', 'WebSocket connection failed.');
+    console.error('Bridge socket error:', event);
     sendRuntimeMessage({ type: 'BRIDGE_STATUS', status: bridgeStatus, lastError });
   });
 }
@@ -260,6 +311,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'BRIDGE_GET_STATUS') {
     sendResponse({ status: bridgeStatus, lastError });
     return;
+  }
+
+  if (message?.type === 'EVENT_LOG') {
+    const payload = message.payload as EventLog | undefined;
+
+    if (
+      payload &&  (payload.from === 'background' || payload.from === 'content_script') 
+    ) {
+      sendEventLog(payload);
+    }
   }
 });
 

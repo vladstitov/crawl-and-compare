@@ -14,6 +14,15 @@ app.use(express_1.default.static(path_1.default.resolve(process.cwd(), 'public')
 app.get('/', (req, res) => {
     res.json({ message: 'Server is running!' });
 });
+app.get('/go-to-url', (req, res) => {
+    const { url } = req.query;
+    if (typeof url !== 'string') {
+        res.status(400).json({ message: 'Invalid URL' });
+        return;
+    }
+    const response = browser_repo_1.BrowserRepo.goToUrl(url);
+    res.json(response);
+});
 browser_repo_1.BrowserRepo.StartBridgeServer(app, PORT);
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);

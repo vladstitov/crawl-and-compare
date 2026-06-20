@@ -1,6 +1,17 @@
-import type { ContentScriptCommand } from '../../shared/interfaces';
+import type { ContentScriptCommand, EventLog } from '../../shared/interfaces';
 
 chrome.runtime.onMessage.addListener((message: ContentScriptCommand , _sender, sendResponse) => {
+  if (message?.command) {
+    const eventLog: EventLog = {
+      from: 'content_script',
+      message: message.command,
+      timestamp: Date.now()
+    };
+
+    chrome.runtime.sendMessage({ type: 'EVENT_LOG', payload: eventLog }).catch(() => {
+      // Background may be reloading; do not block the command path.
+    });
+  }
 
   console.log('Content script received directive:', message);
 

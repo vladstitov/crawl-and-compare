@@ -45,3 +45,9 @@ export interface UploadedHtmlPayload {
   url: string;
   html: string;
 }
+
+export interface EventLog {
+  from: 'background' | 'content_script';
+  message: string;
+  timestamp: number;
+}

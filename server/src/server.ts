@@ -13,6 +13,16 @@ app.get('/', (req: Request, res: Response) => {
   res.json({ message: 'Server is running!' });
 });
 
+
+app.get('/go-to-url', (req: Request, res: Response) => {
+  const { url } = req.query;
+  if (typeof url !== 'string') {
+    res.status(400).json({ message: 'Invalid URL' });
+    return;
+  }
+  const response = BrowserRepo.goToUrl(url);
+  res.json(response);
+});
 BrowserRepo.StartBridgeServer(app, PORT);
 
 app.listen(PORT, () => {

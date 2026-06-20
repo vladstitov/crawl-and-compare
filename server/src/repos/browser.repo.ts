@@ -1,18 +1,46 @@
 import { Express, Request, Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
+import { AnalizerRepo } from './analizer.repo';
 import type {
   BrowserCommandName,
   BridgeResponse,
   NavigateCommand,
   ScrapePageCommand,
   ClickElementCommand,
-  ExtensionSocketResponse,
+  EventLog,
   UploadedHtmlPayload
 } from '../../../shared/interfaces';
 
 export namespace BrowserRepo {
   let extensionSocket: WebSocket | null = null;
   let webSocketServer: WebSocketServer | null = null;
+  let lastHeartbeatAt: number | null = null;
+
+  interface HeartbeatMessage {
+    type: 'HEARTBEAT';
+    timestamp: number;
+  }
+
+  function isEventLog(value: EventLog): value is EventLog {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+
+    return (
+      (value.from === 'background' || value.from === 'content_script')
+
+    );
+  }
+
+  function isHeartbeatMessage(value: unknown): value is HeartbeatMessage {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const payload = value as Record<string, unknown>;
+    return payload.type === 'HEARTBEAT' && typeof payload.timestamp === 'number';
+  }
 
   export function health(): BridgeResponse {
     return {
@@ -68,8 +96,10 @@ export namespace BrowserRepo {
   }
 
 
-  function analyzeAndProceed(url: string, _html: string): void {
-    if (url.includes('/in/')) {
+  async function analyzeAndProceed(url: string, _html: string): Promise<void> {
+    const analysis = await AnalizerRepo.AnalizePage(url, _html);
+
+    if (analysis.isLinkedInProfile) {
       console.log('Target profile HTML received. Ready for analysis.');
       return;
     }
@@ -86,17 +116,19 @@ export namespace BrowserRepo {
   }
 
   export function StartBridgeServer(app: Express, PORT: number): void {
-    app.post('/api/upload-html', (req: Request, res: Response) => {
+    app.post('/api/upload-html', async (req: Request, res: Response) => {
       const { url, html } = req.body as UploadedHtmlPayload;
 
       console.log(`Received HTML from: ${url} (${(html.length / 1024).toFixed(2)} KB)`);
-      analyzeAndProceed(url, html);
+      await analyzeAndProceed(url, html);
       res.json({ status: 'processing' });
     });
-  console.log(`HTML upload endpoint on http://localhost:${PORT}/api/upload-html`);
+
+    console.log(`HTML upload endpoint on http://localhost:${PORT}/api/upload-html`);
+
     if (!webSocketServer) {
       webSocketServer = new WebSocketServer({ port: 8080 });
-        console.log('WebSocket command bridge  on ws://localhost:8080');
+      console.log('WebSocket command bridge  on ws://localhost:8080');
 
       webSocketServer.on('connection', (socket) => {
         console.log('Extension connected via WebSocket.');
@@ -104,20 +136,37 @@ export namespace BrowserRepo {
 
         socket.on('message', (message) => {
           try {
-            const response = JSON.parse(message.toString()) as ExtensionSocketResponse;
-            console.log('Extension response:', response);
+            const payload: any = JSON.parse(message.toString()) as Record<string, unknown>;
+
+            if (isHeartbeatMessage(payload)) {
+              lastHeartbeatAt = payload.timestamp;
+              return;
+            }
+
+
+
+            console.log('Extension response:', payload);
           } catch {
             console.log('Extension sent a non-JSON message:', message.toString());
           }
         });
 
-        socket.on('close', () => {
+        socket.on('close', (code, reasonBuffer) => {
           if (extensionSocket === socket) {
             extensionSocket = null;
           }
 
-          console.log('Extension WebSocket disconnected.');
+          const reason = reasonBuffer?.toString() || '';
+          console.log(`Extension WebSocket disconnected (code ${code})${reason ? `: ${reason}` : '.'}`);
         });
+
+        socket.on('error', (error) => {
+          console.error('Extension WebSocket error:', error.message);
+        });
+      });
+
+      webSocketServer.on('error', (error) => {
+        console.error('WebSocket bridge server error:', error.message);
       });
     }
   }
