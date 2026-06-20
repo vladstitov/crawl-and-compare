@@ -27,15 +27,27 @@ var BrowserRepo;
         };
     }
     function goToUrl(url) {
-        return sendCommand({ command: 'NAVIGATE', url, waitForLoad: true });
+        return sendCommand({
+            id: crypto.randomUUID(),
+            command: 'NAVIGATE',
+            url,
+            waitForLoad: true
+        });
     }
     BrowserRepo.goToUrl = goToUrl;
     function grabHtmlBody() {
-        return sendCommand({ command: 'SCRAPE_PAGE' });
+        return sendCommand({
+            id: crypto.randomUUID(),
+            command: 'SCRAPE_PAGE'
+        });
     }
     BrowserRepo.grabHtmlBody = grabHtmlBody;
     function clickElement(selector) {
-        return sendCommand({ command: 'CLICK_ELEMENT', selector });
+        return sendCommand({
+            id: crypto.randomUUID(),
+            command: 'CLICK_ELEMENT',
+            selector
+        });
     }
     BrowserRepo.clickElement = clickElement;
     function getElementContent(selector) {
@@ -45,17 +57,13 @@ var BrowserRepo;
         };
     }
     BrowserRepo.getElementContent = getElementContent;
-    function logBridgeStatus(port) {
-        console.log(`HTML upload endpoint is running on http://localhost:${port}/api/upload-html`);
-        console.log('WebSocket command bridge is running on ws://localhost:8080');
-    }
-    BrowserRepo.logBridgeStatus = logBridgeStatus;
     function analyzeAndProceed(url, _html) {
         if (url.includes('/in/')) {
             console.log('Target profile HTML received. Ready for analysis.');
             return;
         }
         const response = sendCommand({
+            id: crypto.randomUUID(),
             command: 'CLICK_ELEMENT',
             selector: "button[aria-label*='About']"
         });
@@ -63,15 +71,17 @@ var BrowserRepo;
             console.error(response.message);
         }
     }
-    function StartBridgeServer(app) {
+    function StartBridgeServer(app, PORT) {
         app.post('/api/upload-html', (req, res) => {
             const { url, html } = req.body;
             console.log(`Received HTML from: ${url} (${(html.length / 1024).toFixed(2)} KB)`);
             analyzeAndProceed(url, html);
             res.json({ status: 'processing' });
         });
+        console.log(`HTML upload endpoint on http://localhost:${PORT}/api/upload-html`);
         if (!webSocketServer) {
             webSocketServer = new ws_1.WebSocketServer({ port: 8080 });
+            console.log('WebSocket command bridge  on ws://localhost:8080');
             webSocketServer.on('connection', (socket) => {
                 console.log('Extension connected via WebSocket.');
                 extensionSocket = socket;

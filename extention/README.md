@@ -22,9 +22,7 @@ This folder contains a minimal Chrome Extension (Manifest V3) setup using TypeSc
 
 - `src/background.ts`: Service worker
 - `src/content.ts`: Content script
-- `src/popup.ts`: Popup UI logic
 - `static/manifest.json`: Extension manifest
-- `static/popup.html`: Popup UI
 
 ## Development tip
 

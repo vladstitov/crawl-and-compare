@@ -2,15 +2,15 @@
   "name": "server",
   "version": "1.0.0",
   "description": "",
-  "main": "dist/server.js",
+  "main": "dist/server/src/server.js",
   "scripts": {
-    "start": "node dist/server.js",
+    "start": "node dist/server/src/server.js",
     "dev": "ts-node --watch src/server.ts",
     "build": "tsc",
     "watch:tsc": "tsc -w",
-    "watch:node": "nodemon --ignore public/ dist/server.js",
-    "test-db": "node dist/tests/test-db.js",
-    "test-browser": "node dist/tests/test-browser.js"
+    "watch:node": "nodemon --ignore public/ dist/server/src/server.js",
+    "test-db": "node dist/server/src/tests/test-db.js",
+    "test-browser": "node dist/server/src/tests/test-browser.js"
   },
   "keywords": [],
   "author": "",

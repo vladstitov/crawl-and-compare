@@ -35,10 +35,6 @@ const contexts = [
   {
     entryPoints: ['src/content.ts'],
     format: 'iife'
-  },
-  {
-    entryPoints: ['src/popup.ts'],
-    format: 'iife'
   }
 ];
 

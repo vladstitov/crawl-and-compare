@@ -1,34 +1,16 @@
 import { Express, Request, Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
+import type {
+  BrowserCommandName,
+  BridgeResponse,
+  NavigateCommand,
+  ScrapePageCommand,
+  ClickElementCommand,
+  ExtensionSocketResponse,
+  UploadedHtmlPayload
+} from '../../../shared/interfaces';
 
 export namespace BrowserRepo {
-  export type BrowserCommandName = 'NAVIGATE' | 'SCRAPE_PAGE' | 'CLICK_ELEMENT';
-
-  export type BrowserCommand = {
-    command: BrowserCommandName;
-    url?: string;
-    selector?: string;
-    waitForLoad?: boolean;
-  };
-
-  export type ExtensionResponse = {
-    ok: boolean;
-    command?: BrowserCommandName;
-    error?: string;
-    data?: unknown;
-  };
-
-  export type BridgeResponse = {
-    ok: boolean;
-    message: string;
-    data?: unknown;
-  };
-
-  type UploadedHtmlPayload = {
-    url: string;
-    html: string;
-  };
-
   let extensionSocket: WebSocket | null = null;
   let webSocketServer: WebSocketServer | null = null;
 
@@ -39,7 +21,7 @@ export namespace BrowserRepo {
     };
   }
 
-  function sendCommand(command: BrowserCommand): BridgeResponse {
+  function sendCommand(command: NavigateCommand | ScrapePageCommand | ClickElementCommand): BridgeResponse {
     if (!extensionSocket || extensionSocket.readyState !== WebSocket.OPEN) {
       return {
         ok: false,
@@ -55,15 +37,27 @@ export namespace BrowserRepo {
   }
 
   export function goToUrl(url: string): BridgeResponse {
-    return sendCommand({ command: 'NAVIGATE', url, waitForLoad: true });
+    return sendCommand({
+      id: crypto.randomUUID(),
+      command: 'NAVIGATE',
+      url,
+      waitForLoad: true
+    });
   }
 
   export function grabHtmlBody(): BridgeResponse {
-    return sendCommand({ command: 'SCRAPE_PAGE' });
+    return sendCommand({
+      id: crypto.randomUUID(),
+      command: 'SCRAPE_PAGE'
+    });
   }
 
   export function clickElement(selector: string): BridgeResponse {
-    return sendCommand({ command: 'CLICK_ELEMENT', selector });
+    return sendCommand({
+      id: crypto.randomUUID(),
+      command: 'CLICK_ELEMENT',
+      selector
+    });
   }
 
   export function getElementContent(selector: string): BridgeResponse {
@@ -81,6 +75,7 @@ export namespace BrowserRepo {
     }
 
     const response = sendCommand({
+      id: crypto.randomUUID(),
       command: 'CLICK_ELEMENT',
       selector: "button[aria-label*='About']"
     });
@@ -109,7 +104,7 @@ export namespace BrowserRepo {
 
         socket.on('message', (message) => {
           try {
-            const response = JSON.parse(message.toString()) as ExtensionResponse;
+            const response = JSON.parse(message.toString()) as ExtensionSocketResponse;
             console.log('Extension response:', response);
           } catch {
             console.log('Extension sent a non-JSON message:', message.toString());

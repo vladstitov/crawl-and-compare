@@ -3,10 +3,6 @@
   "name": "Chrome Extension Starter",
   "version": "0.1.0",
   "description": "Starter extension built with TypeScript and esbuild",
-  "action": {
-    "default_title": "Starter",
-    "default_popup": "popup.html"
-  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

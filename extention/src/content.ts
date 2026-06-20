@@ -1,120 +1,54 @@
-type BrowserCommandAction = 'grabHtmlBody' | 'clickElement' | 'getElementContent';
+import type { ContentScriptCommand } from '../../shared/interfaces';
 
-type BrowserDomCommandRequest = {
-  action: BrowserCommandAction;
-  selector?: string;
-};
+chrome.runtime.onMessage.addListener((message: ContentScriptCommand , _sender, sendResponse) => {
 
-type BrowserDomCommandEnvelope = {
-  type: 'BROWSER_DOM_COMMAND';
-  requestId: string;
-  command: BrowserDomCommandRequest;
-};
+  console.log('Content script received directive:', message);
 
-type BrowserDomCommandResult = {
-  type: 'browser:result';
-  requestId: string;
-  action: BrowserCommandAction;
-  ok: boolean;
-  data?: unknown;
-  error?: string;
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isDomCommand(message: unknown): message is BrowserDomCommandEnvelope {
-  return (
-    isRecord(message) &&
-    message.type === 'BROWSER_DOM_COMMAND' &&
-    typeof message.requestId === 'string' &&
-    isRecord(message.command) &&
-    typeof message.command.action === 'string'
-  );
-}
-
-function getElement(selector: string): Element {
-  const element = document.querySelector(selector);
-  if (!element) {
-    throw new Error(`No element matched selector: ${selector}`);
-  }
-
-  return element;
-}
-
-function executeDomCommand(message: BrowserDomCommandEnvelope): BrowserDomCommandResult {
-  try {
-    if (message.command.action === 'grabHtmlBody') {
-      return {
-        type: 'browser:result',
-        requestId: message.requestId,
-        action: message.command.action,
-        ok: true,
-        data: {
-          html: document.body?.outerHTML ?? '',
-          title: document.title,
-          url: location.href
-        }
+  switch (message?.command) {
+    case 'SCRAPE_PAGE': {
+      const payload = {
+        url: window.location.href,
+        html: document.documentElement.outerHTML
       };
+
+      fetch('http://localhost:3000/api/upload-html', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+        .then(() => sendResponse({ success: true, detail: 'HTML pushed to HTTP API' }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            detail: error instanceof Error ? error.message : 'HTML upload failed.'
+          })
+        );
+
+      return true;
     }
 
-    if (!message.command.selector) {
-      throw new Error(`The ${message.command.action} command requires a selector.`);
+    case 'PING_FROM_BACKGROUND': {
+      console.log('Received message from background:', message);
+      sendResponse({ ok: true, pageTitle: document.title });
+      return true;
     }
 
-    const element = getElement(message.command.selector);
+    case 'CLICK_ELEMENT': {
+      const element = document.querySelector(message.selector);
 
-    if (message.command.action === 'clickElement') {
-      (element as HTMLElement).click();
-
-      return {
-        type: 'browser:result',
-        requestId: message.requestId,
-        action: message.command.action,
-        ok: true,
-        data: {
-          selector: message.command.selector,
-          clicked: true
-        }
-      };
-    }
-
-    return {
-      type: 'browser:result',
-      requestId: message.requestId,
-      action: message.command.action,
-      ok: true,
-      data: {
-        selector: message.command.selector,
-        text: element.textContent ?? '',
-        html: element.innerHTML
+      if (element) {
+        (element as HTMLElement).click();
+        sendResponse({ success: true, detail: 'Clicked successfully' });
+      } else {
+        sendResponse({ success: false, detail: 'Selector not found' });
       }
-    };
-  } catch (error) {
-    return {
-      type: 'browser:result',
-      requestId: message.requestId,
-      action: message.command.action,
-      ok: false,
-      error: error instanceof Error ? error.message : 'Command failed.'
-    };
-  }
-}
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (isDomCommand(message)) {
-    const result = executeDomCommand(message);
-    sendResponse(result);
-    return;
-  }
+      return true;
+    }
 
-  if (message?.type !== 'PING_FROM_BACKGROUND') {
-    return;
+    default:
+      break;
   }
-
-  console.log('Received message from background:', message);
-  sendResponse({ ok: true, pageTitle: document.title });
 });
 
 export {};
