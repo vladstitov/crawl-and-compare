@@ -176,8 +176,8 @@ function connectBridge(): void {
 
       switch (parsed.command) {
         case 'NAVIGATE': {
-          if (typeof parsed.id !== 'string') {
-            throw new Error('The NAVIGATE command requires an id.');
+          if (typeof parsed._id !== 'string') {
+            throw new Error('The NAVIGATE command requires an _id.');
           }
 
           if (typeof parsed.url !== 'string') {
@@ -195,7 +195,7 @@ function connectBridge(): void {
 
           callBackToSocket({
             ok: true,
-            id: parsed.id,
+            _id: parsed._id,
             command: 'NAVIGATE',
             data: {
               tabId: targetTabId,
@@ -207,18 +207,18 @@ function connectBridge(): void {
 
         case 'SCRAPE_PAGE': {
           const targetTabId = await getTargetTabId();
-          if (typeof parsed.id !== 'string') {
-            throw new Error('The SCRAPE_PAGE command requires an id.');
+          if (typeof parsed._id !== 'string') {
+            throw new Error('The SCRAPE_PAGE command requires an _id.');
           }
 
           const contentResult = await sendContentCommand(targetTabId, {
-            id: parsed.id,
+            _id: parsed._id,
             command: 'SCRAPE_PAGE'
           });
 
           callBackToSocket({
             ok: true,
-            id: parsed.id,
+            _id: parsed._id,
             command: 'SCRAPE_PAGE',
             data: contentResult
           });
@@ -226,8 +226,8 @@ function connectBridge(): void {
         }
 
         case 'CLICK_ELEMENT': {
-          if (typeof parsed.id !== 'string') {
-            throw new Error('The CLICK_ELEMENT command requires an id.');
+          if (typeof parsed._id !== 'string') {
+            throw new Error('The CLICK_ELEMENT command requires an _id.');
           }
 
           if (typeof parsed.selector !== 'string' || !parsed.selector) {
@@ -236,7 +236,7 @@ function connectBridge(): void {
 
           const targetTabId = await getTargetTabId();
           const contentResult = await sendContentCommand(targetTabId, {
-            id: parsed.id,
+            _id: parsed._id,
             command: 'CLICK_ELEMENT',
             selector: parsed.selector
           });
@@ -248,7 +248,7 @@ function connectBridge(): void {
 
           callBackToSocket({
             ok: true,
-            id: parsed.id,
+            _id: parsed._id,
             command: 'CLICK_ELEMENT',
             data: contentResult
           });
@@ -260,12 +260,12 @@ function connectBridge(): void {
       }
     } catch (error) {
       const command = typeof parsed?.command === 'string' ? (parsed.command as ExtensionCommand['command']) : undefined;
-      const id = typeof parsed?.id === 'string' ? parsed.id : undefined;
+      const _id = typeof parsed?._id === 'string' ? parsed._id : undefined;
 
       if (command === 'NAVIGATE' || command === 'SCRAPE_PAGE' || command === 'CLICK_ELEMENT') {
         callBackToSocket({
           ok: false,
-          id,
+          _id,
           command,
           error: error instanceof Error ? error.message : 'Command failed.'
         });

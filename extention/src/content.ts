@@ -1,4 +1,4 @@
-import type { ContentScriptCommand, EventLog } from '../../shared/interfaces';
+import type { ContentScriptCommand, EventLog, ScrapePageCommand } from '../../shared/interfaces';
 
 chrome.runtime.onMessage.addListener((message: ContentScriptCommand , _sender, sendResponse) => {
   if (message?.command) {
@@ -17,7 +17,9 @@ chrome.runtime.onMessage.addListener((message: ContentScriptCommand , _sender, s
 
   switch (message?.command) {
     case 'SCRAPE_PAGE': {
-      const payload = {
+      const payload: ScrapePageCommand = {
+        _id: message._id,
+        command: 'SCRAPE_PAGE',
         url: window.location.href,
         html: document.documentElement.outerHTML
       };

@@ -1,14 +1,14 @@
 import { Express, Request, Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { AnalizerRepo } from './analizer.repo';
+import { jobsCollection } from '../core/database';
 import type {
   BrowserCommandName,
   BridgeResponse,
   NavigateCommand,
   ScrapePageCommand,
   ClickElementCommand,
-  EventLog,
-  UploadedHtmlPayload
+  EventLog
 } from '../../../shared/interfaces';
 
 export namespace BrowserRepo {
@@ -64,9 +64,17 @@ export namespace BrowserRepo {
     };
   }
 
+  export function sendNavigateCommand(command: NavigateCommand): BridgeResponse {
+    return sendCommand(command);
+  }
+
+  export function sendScrapeCommand(command: ScrapePageCommand): BridgeResponse {
+    return sendCommand(command);
+  }
+
   export function goToUrl(url: string): BridgeResponse {
     return sendCommand({
-      id: crypto.randomUUID(),
+      _id: crypto.randomUUID(),
       command: 'NAVIGATE',
       url,
       waitForLoad: true
@@ -75,14 +83,14 @@ export namespace BrowserRepo {
 
   export function grabHtmlBody(): BridgeResponse {
     return sendCommand({
-      id: crypto.randomUUID(),
+      _id: crypto.randomUUID(),
       command: 'SCRAPE_PAGE'
     });
   }
 
   export function clickElement(selector: string): BridgeResponse {
     return sendCommand({
-      id: crypto.randomUUID(),
+      _id: crypto.randomUUID(),
       command: 'CLICK_ELEMENT',
       selector
     });
@@ -95,33 +103,26 @@ export namespace BrowserRepo {
     };
   }
 
-
-  async function analyzeAndProceed(url: string, _html: string): Promise<void> {
-    const analysis = await AnalizerRepo.AnalizePage(url, _html);
-
-    if (analysis.isLinkedInProfile) {
-      console.log('Target profile HTML received. Ready for analysis.');
-      return;
-    }
-
-    const response = sendCommand({
-      id: crypto.randomUUID(),
-      command: 'CLICK_ELEMENT',
-      selector: "button[aria-label*='About']"
-    });
-
-    if (!response.ok) {
-      console.error(response.message);
-    }
-  }
-
   export function StartBridgeServer(app: Express, PORT: number): void {
     app.post('/api/upload-html', async (req: Request, res: Response) => {
-      const { url, html } = req.body as UploadedHtmlPayload;
+      const data: ScrapePageCommand = req.body;
 
-      console.log(`Received HTML from: ${url} (${(html.length / 1024).toFixed(2)} KB)`);
-      await analyzeAndProceed(url, html);
-      res.json({ status: 'processing' });
+      const analysis = await AnalizerRepo.AnalizePage(data);
+
+      if (analysis._id) {
+        await jobsCollection.updateAsync(
+          { _id: analysis._id },
+          {
+            $set: {
+              ...analysis,
+              status: 'downloaded',
+              updatedAt: new Date()
+            }
+          }
+        );
+      }
+
+      res.json({ status: 'PASSED', _id: data._id });
     });
 
     console.log(`HTML upload endpoint on http://localhost:${PORT}/api/upload-html`);

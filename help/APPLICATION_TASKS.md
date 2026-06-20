@@ -8,15 +8,17 @@ Build a workflow that can:
 - control a browser through a Chrome extension,
 - crawl target pages,
 - analyze page HTML (rule-based and AI-based),
-- decide next navigation actions,
 - and save data in database.
+- decide next navigation actions,
+
 
 ## Current System Components
 
-- client/: Angular UI application.
+- client/: Angular UI application to browse database.
 - server/: Express API + WebSocket command bridge.
 - extention/: Chrome extension (Manifest V3) that executes commands and uploads HTML.
 - shared/: shared TypeScript command and payload contracts.
+- database layer to save results.
 
 ## Core Functional Tasks
 
@@ -30,16 +32,19 @@ Build a workflow that can:
 - Trigger scrape command from server.
 - Collect current page HTML in extension.
 - POST payload { url, html } to server /api/upload-html.
+- Parse HTML to validate existing tags.
 - Validate payload shape and reject malformed requests.
+- Save raw and parsed HTML in database.
+
+
 
 3. Rule-based page analysis
 - Analyze page URL + HTML in AnalizerRepo.AnalizePage.
-- Detect profile/non-profile pages.
+- Detect wrong page loaded.
 - Return normalized analysis result:
   - url
   - htmlSizeInBytes
-  - isLinkedInProfile
-  - nextAction
+ 
 
 4. AI-based page analysis
 - Send URL + HTML prompt to Ollama API.

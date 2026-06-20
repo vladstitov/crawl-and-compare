@@ -1,4 +1,5 @@
 import type { AnalizerRepo } from './analizer.repo';
+import type { JobDocument } from '../core/database';
 
 export namespace AnalizeWithAiRepo {
   export type AnalizePageResult = AnalizerRepo.AnalizePageResult;
@@ -8,17 +9,28 @@ export namespace AnalizeWithAiRepo {
   }
 
   interface OllamaAnalizePageResponse {
-    isLinkedInProfile?: boolean;
-    nextAction?: AnalizePageResult['nextAction'];
+    title?: string;
+    status?: JobDocument['status'];
   }
 
   export async function AnalizePageAI(url: string, html: string): Promise<AnalizePageResult> {
     const normalizedUrl = url.trim();
     const fallbackResult: AnalizePageResult = {
+      _id: crypto.randomUUID(),
+      reference: `ai-analysis:${Date.now()}`,
       url: normalizedUrl,
-      htmlSizeInBytes: html.length,
-      isLinkedInProfile: normalizedUrl.includes('/in/'),
-      nextAction: normalizedUrl.includes('/in/') ? 'NONE' : 'OPEN_ABOUT_SECTION'
+      title: normalizedUrl,
+      sourceName: (() => {
+        try {
+          return new URL(normalizedUrl).hostname;
+        } catch {
+          return 'unknown';
+        }
+      })(),
+      htmlPage: html,
+      htmlData: '{}',
+      hasTags: [],
+      status: 'completed'
     };
 
     const ollamaUrl = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434/api/generate';
@@ -37,8 +49,8 @@ export namespace AnalizeWithAiRepo {
           prompt: [
             'Analyze this crawled web page and respond with JSON only.',
             'Return an object with exactly these fields:',
-            '- isLinkedInProfile: boolean',
-            "- nextAction: 'NONE' or 'OPEN_ABOUT_SECTION'",
+            '- title: string',
+            "- status: 'pending' | 'running' | 'completed' | 'failed'",
             `URL: ${normalizedUrl}`,
             `HTML: ${html}`
           ].join('\n')
@@ -58,14 +70,17 @@ export namespace AnalizeWithAiRepo {
       const aiResult = JSON.parse(payload.response) as OllamaAnalizePageResponse;
 
       return {
-        url: normalizedUrl,
-        htmlSizeInBytes: html.length,
-        isLinkedInProfile: typeof aiResult.isLinkedInProfile === 'boolean'
-          ? aiResult.isLinkedInProfile
-          : fallbackResult.isLinkedInProfile,
-        nextAction: aiResult.nextAction === 'NONE' || aiResult.nextAction === 'OPEN_ABOUT_SECTION'
-          ? aiResult.nextAction
-          : fallbackResult.nextAction
+        ...fallbackResult,
+        title: typeof aiResult.title === 'string' && aiResult.title.trim().length > 0
+          ? aiResult.title.trim()
+          : fallbackResult.title,
+        status:
+          aiResult.status === 'pending' ||
+          aiResult.status === 'running' ||
+          aiResult.status === 'completed' ||
+          aiResult.status === 'failed'
+            ? aiResult.status
+            : fallbackResult.status
       };
     } catch (error) {
       console.error('Failed to analyze page with Ollama:', error);

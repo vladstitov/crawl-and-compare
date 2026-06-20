@@ -7,7 +7,9 @@ export interface JobDocument extends Record<string, unknown> {
   url: string;
   sourceName: string;
   htmlPage: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  htmlData: any;
+  hasTags: {tag: string, text: string}[];
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'downloaded';
   createdAt?: Date;
   updatedAt?: Date;
 }

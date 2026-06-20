@@ -1,19 +1,19 @@
 export interface NavigateCommand {
-    id: string;
+    _id: string;
     command: 'NAVIGATE';
     url?: string;
     waitForLoad?: boolean;
     result?: string;
 }
 export interface ScrapePageCommand {
-    id: string;
+    _id: string;
     command: 'SCRAPE_PAGE';
     data: any;
     html?: string;
     url?: string;
 }
 export interface ClickElementCommand {
-    id: string;
+    _id: string;
     command: 'CLICK_ELEMENT';
     data: any;
     selector?: string;
@@ -26,7 +26,7 @@ export type ExtensionCommand = NavigateCommand | ScrapePageCommand | ClickElemen
 export type ContentScriptCommand = ScrapePageCommand | ClickElementCommand | PingFromBackgroundCommand;
 export interface ExtensionSocketResponse {
     ok: boolean;
-    id?: string;
+    _id?: string;
     command?: ExtensionCommand['command'];
     data?: unknown;
     error?: string;
