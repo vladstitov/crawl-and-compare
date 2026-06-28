@@ -21,21 +21,12 @@ chrome.runtime.onMessage.addListener((message: ContentScriptCommand , _sender, s
         _id: message._id,
         command: 'SCRAPE_PAGE',
         url: window.location.href,
+        title: document.title,
         html: document.documentElement.outerHTML
       };
 
-      fetch('http://localhost:3000/api/upload-html', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-        .then(() => sendResponse({ success: true, detail: 'HTML pushed to HTTP API' }))
-        .catch((error) =>
-          sendResponse({
-            success: false,
-            detail: error instanceof Error ? error.message : 'HTML upload failed.'
-          })
-        );
+      // Return raw scrape data to background; background owns localhost network access.
+      sendResponse(payload);
 
       return true;
     }

@@ -28,6 +28,32 @@ let bridgeSocket: WebSocket | null = null;
 let reconnectTimer: number | null = null;
 let heartbeatTimer: number | null = null;
 
+function isScrapePagePayload(value: unknown): value is ScrapePageCommand {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const payload = value as Partial<ScrapePageCommand>;
+  return (
+    payload.command === 'SCRAPE_PAGE' &&
+    typeof payload._id === 'string' &&
+    typeof payload.url === 'string' &&
+    typeof payload.html === 'string'
+  );
+}
+
+async function uploadScrapedPage(payload: ScrapePageCommand): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/upload-html`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Upload failed with status ${response.status}.`);
+  }
+}
+
 function setStatus(next: BridgeStatus, error = ''): void {
   bridgeStatus = next;
   lastError = error;
@@ -76,6 +102,32 @@ function waitForTabLoad(tabId: number, timeoutMs = 30000): Promise<void> {
 
 async function sendContentCommand(tabId: number, command: ContentScriptCommand): Promise<unknown> {
   return chrome.tabs.sendMessage(tabId, command);
+}
+
+async function sendContentCommandWithRetry(
+  tabId: number,
+  command: ContentScriptCommand,
+  attempts = 5,
+  delayMs = 400
+): Promise<unknown> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await sendContentCommand(tabId, command);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send content command.';
+      const isReceiverMissing = message.includes('Receiving end does not exist');
+
+      if (!isReceiverMissing || attempt === attempts) {
+        throw error;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), delayMs);
+      });
+    }
+  }
+
+  throw new Error('Could not deliver command to content script.');
 }
 
 function sendSocketPayload(payload: any): void {
@@ -211,16 +263,26 @@ function connectBridge(): void {
             throw new Error('The SCRAPE_PAGE command requires an _id.');
           }
 
-          const contentResult = await sendContentCommand(targetTabId, {
+          const contentResult = await sendContentCommandWithRetry(targetTabId, {
             _id: parsed._id,
             command: 'SCRAPE_PAGE'
           });
+
+          if (!isScrapePagePayload(contentResult)) {
+            throw new Error('Content script returned invalid scrape payload.');
+          }
+
+          await uploadScrapedPage(contentResult);
 
           callBackToSocket({
             ok: true,
             _id: parsed._id,
             command: 'SCRAPE_PAGE',
-            data: contentResult
+            data: {
+              detail: 'HTML uploaded to server API.',
+              url: contentResult.url,
+              title: contentResult.title
+            }
           });
           break;
         }

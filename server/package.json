@@ -4,11 +4,14 @@
   "description": "",
   "main": "dist/server/src/server.js",
   "scripts": {
-    "start": "node dist/server/src/server.js",
+     "tsc": "tsc -w",
+      "nodemon": "nodemon --ignore public/ dist/server/src/server.js",
+
+    "server": "node dist/server/src/server.js",
     "dev": "ts-node --watch src/server.ts",
     "build": "tsc",
-    "watch:tsc": "tsc -w",
-    "watch:node": "nodemon --ignore public/ dist/server/src/server.js",
+   
+ 
     "test-db": "node dist/server/src/tests/test-db.js",
     "test-browser": "node dist/server/src/tests/test-browser.js"
   },

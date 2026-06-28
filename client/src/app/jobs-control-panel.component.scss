@@ -1,0 +1,165 @@
+:host {
+  display: block;
+  min-height: 100dvh;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background:
+    radial-gradient(circle at top left, #e4f1ff 0%, transparent 45%),
+    radial-gradient(circle at bottom right, #fce9d3 0%, transparent 42%),
+    #f5f7fa;
+  color: #1d2433;
+}
+
+.dashboard {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 0.9rem;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.toolbar button {
+  display: flex;
+  align-items: center;
+}
+
+.status-card {
+  margin: 0 0 1rem;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 330px 1fr;
+  gap: 1rem;
+}
+
+.list-panel,
+.details-panel {
+  padding: 0.2rem;
+  min-height: 560px;
+}
+
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.job-item {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem;
+}
+
+.job-item strong {
+  color: #14203a;
+}
+
+.job-item span,
+.job-item small {
+  color: #56627f;
+}
+
+.job-item.active {
+  border: 2px solid #1c5fad;
+  background: color-mix(in srgb, var(--mat-sys-primary) 10%, white);
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.details-grid label {
+  display: block;
+  font-size: 0.78rem;
+  color: #56627f;
+  margin-bottom: 0.2rem;
+}
+
+.details-grid p {
+  margin: 0;
+  background: #f6f8fd;
+  border: 1px solid #e0e6f3;
+  border-radius: 0.5rem;
+  padding: 0.48rem 0.55rem;
+  word-break: break-word;
+}
+
+.section-divider {
+  margin: 1rem 0;
+}
+
+.full-width-section {
+  margin-top: 1rem;
+}
+
+.full-width-section h3 {
+  margin: 0 0 0.45rem;
+}
+
+.tag-list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+pre {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  background: #111827;
+  color: #d1e7ff;
+  border-radius: 0.6rem;
+  padding: 0.7rem;
+}
+
+.empty-text {
+  color: #5b6781;
+}
+
+@media (max-width: 940px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .list-panel,
+  .details-panel {
+    min-height: auto;
+  }
+
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar .spacer {
+    display: none;
+  }
+
+  .toolbar button {
+    width: 100%;
+  }
+}

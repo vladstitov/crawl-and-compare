@@ -7,6 +7,10 @@ export interface NavigateCommand {
 export interface ScrapePageCommand {
     _id: string;
     command: 'SCRAPE_PAGE';
+    url?: string;
+    html?: string;
+    title?: string;
+    sourceName?: string;
 }
 export interface ClickElementCommand {
     _id: string;
@@ -31,10 +35,6 @@ export interface BridgeResponse {
     ok: boolean;
     message: string;
     data?: unknown;
-}
-export interface UploadedHtmlPayload {
-    url: string;
-    html: string;
 }
 export interface EventLog {
     from: 'background' | 'content_script';

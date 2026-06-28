@@ -1,0 +1,136 @@
+<main class="dashboard">
+  <mat-toolbar color="primary" class="toolbar">
+    <span class="title"> Control Panel</span>
+    <span class="spacer"></span>
+    <button mat-flat-button color="accent" type="button" (click)="openCreateDialog()" [disabled]="isSaving">
+      Create New Record
+    </button>
+    <button mat-stroked-button type="button" (click)="startProcess()">Start Process</button>
+    <button mat-stroked-button type="button" (click)="stopProcess()">Stop Process</button>
+    <button mat-stroked-button type="button" (click)="getCurrentProcessStatus()">Get Process Status</button>
+    <button mat-stroked-button type="button" (click)="loadJobs()">Refresh Jobs</button>
+  </mat-toolbar>
+
+  @if (statusMessage) {
+    <mat-card class="status-card">
+      <mat-card-content>{{ statusMessage }}</mat-card-content>
+    </mat-card>
+  }
+
+  <section class="workspace">
+    <mat-card class="list-panel" appearance="outlined">
+      <mat-card-header>
+        <mat-card-title>Jobs</mat-card-title>
+      </mat-card-header>
+
+      @if (isLoading) {
+        <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+      }
+
+      <mat-card-content>
+        @if (!isLoading && jobs.length === 0) {
+          <p class="empty-text">No jobs found.</p>
+        }
+
+        <div class="job-list">
+          @for (job of jobs; track trackByJobId($index, job)) {
+            <button
+              mat-stroked-button
+              type="button"
+              class="job-item"
+              [class.active]="selectedJob?._id === job._id"
+              (click)="selectJob(job)"
+            >
+              <strong>{{ job.name || 'Unnamed Job' }}</strong>
+              <span>{{ job.status || 'no-status' }} | {{ job.workflow || 'no-workflow' }}</span>
+              <small>{{ job.url || 'No URL' }}</small>
+            </button>
+          }
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <mat-card class="details-panel" appearance="outlined">
+      <mat-card-header>
+        <mat-card-title>Details</mat-card-title>
+      </mat-card-header>
+
+      <mat-card-content>
+        @if (selectedJob) {
+          <div class="details-grid">
+            <div>
+              <label>ID</label>
+              <p>{{ selectedJob._id || '-' }}</p>
+            </div>
+            <div>
+              <label>Reference</label>
+              <p>{{ selectedJob.reference || '-' }}</p>
+            </div>
+            <div>
+              <label>Name</label>
+              <p>{{ selectedJob.name || '-' }}</p>
+            </div>
+            <div>
+              <label>Title</label>
+              <p>{{ selectedJob.title || '-' }}</p>
+            </div>
+            <div>
+              <label>URL</label>
+              <p>{{ selectedJob.url || '-' }}</p>
+            </div>
+            <div>
+              <label>Source</label>
+              <p>{{ selectedJob.sourceName || '-' }}</p>
+            </div>
+            <div>
+              <label>Status</label>
+              <p>{{ selectedJob.status || '-' }}</p>
+            </div>
+            <div>
+              <label>Workflow</label>
+              <p>{{ selectedJob.workflow || '-' }}</p>
+            </div>
+            <div>
+              <label>Created At</label>
+              <p>{{ selectedJob.createdAt || '-' }}</p>
+            </div>
+            <div>
+              <label>Updated At</label>
+              <p>{{ selectedJob.updatedAt || '-' }}</p>
+            </div>
+          </div>
+
+          <mat-divider class="section-divider"></mat-divider>
+
+          <section class="full-width-section">
+            <h3>Tags</h3>
+            @if (selectedJob.hasTags?.length) {
+              <mat-chip-set>
+                @for (tag of selectedJob.hasTags; track tag.tag + ':' + tag.text) {
+                  <mat-chip>{{ tag.tag }}: {{ tag.text }}</mat-chip>
+                }
+              </mat-chip-set>
+            } @else {
+              <p class="empty-text">No tags on this record.</p>
+            }
+          </section>
+
+          <section class="full-width-section">
+            <h3>Raw Record</h3>
+            <pre>{{ selectedJob | json }}</pre>
+          </section>
+        } @else {
+          <p class="empty-text">Select a job from the left list to see details.</p>
+        }
+
+        @if (processStatus) {
+          <mat-divider class="section-divider"></mat-divider>
+          <section class="full-width-section">
+            <h3>Current Process Status</h3>
+            <pre>{{ processStatus | json }}</pre>
+          </section>
+        }
+      </mat-card-content>
+    </mat-card>
+  </section>
+</main>

@@ -4,71 +4,54 @@ import { jobsCollection } from '../core/database';
 import { BrowserRepo } from '../repos/browser.repo';
 
 export namespace WebCrawlerController {
-    let isRunning = false;
+    let isCrawling = false;
     let stopSignal = false;
-    const START_URL = 'https://ca.indeed.com/';
+    let current_id: string | null = null;
+    let currentTask: string | null = null;
 
-    const tasks = [
-        { navigateToURL: 'https://ca.indeed.com/'},
-        { },
-
-       
-        // Add more tasks as needed
-    ];
-
-    async function waitForDownloadedStatus(_id: string, timeoutMs = 120000, pollMs = 1000): Promise<void> {
-        const startedAt = Date.now();
-
-        while (Date.now() - startedAt < timeoutMs) {
-            const doc = await jobsCollection.findOneAsync({ _id });
-
-            if (doc?.status === 'downloaded') {
-                return;
-            }
-
-            await new Promise<void>((resolve) => {
-                setTimeout(() => resolve(), pollMs);
-            });
-        }
-
-        throw new Error(`Timed out waiting for command ${_id} to reach status downloaded.`);
+    interface CrawlStepResult {
+        ok: boolean;
+        message: string;
+        _id?: string;
     }
 
-    export async function Start() {
-        if (isRunning) {
-            console.log('Web crawler is already running.');
-            return;
-        }
-        isRunning = true;
-        stopSignal = false;
-        console.log('Web crawler started.');
 
-        const createdJob = await jobsCollection.insertAsync({
-            reference: 'crawl:pending',
-            title: 'Indeed Start Page Crawl',
-            url: START_URL,
-            sourceName: 'ca.indeed.com',
-            htmlPage: '',
-            htmlData: null,
-            hasTags: [],
-            status: 'pending',
-            createdAt: new Date(),
-            updatedAt: new Date()
-        });
 
-        if (!createdJob._id) {
-            isRunning = false;
-            throw new Error('Database did not return _id for created crawl command.');
+    async function scrapeById(_id: string): Promise<CrawlStepResult> {
+        if (stopSignal) {
+            return { ok: false, message: 'Crawler is stopped.', _id };
         }
+
+        currentTask = 'scrape';
+        current_id = _id;
+        isCrawling = true;
+
+        const scrapeResult = await BrowserRepo.scrapeHtmlAndSave(_id);
+
+        isCrawling = false;
+        currentTask = null;
+        return { ok: scrapeResult.ok, message: scrapeResult.message, _id };
+    }
+
+    async function navigateByJob(job: { _id: string; url?: string | null }): Promise<CrawlStepResult> {
+        if (stopSignal) {
+            return { ok: false, message: 'Crawler is stopped.', _id: job._id };
+        }
+
+        if (!job.url) {
+            return { ok: false, message: 'Job url is empty.', _id: job._id };
+        }
+
+        currentTask = 'navigate';
+        current_id = job._id;
+        isCrawling = true;
 
         const command: NavigateCommand = {
-            _id: createdJob._id,
+            _id: job._id,
             command: 'NAVIGATE',
-            url: START_URL,
+            url: job.url,
             waitForLoad: true
         };
-
-   
 
         const navigateResponse = BrowserRepo.sendNavigateCommand(command);
         if (!navigateResponse.ok) {
@@ -81,8 +64,41 @@ export namespace WebCrawlerController {
                     }
                 }
             );
-            isRunning = false;
-            throw new Error(navigateResponse.message);
+
+            isCrawling = false;
+            currentTask = null;
+            return { ok: false, message: navigateResponse.message, _id: command._id };
+        }
+
+        const navigateAck = await BrowserRepo.waitForCommandResponse(command._id, 'NAVIGATE');
+        if (!navigateAck) {
+            await jobsCollection.updateAsync(
+                { _id: command._id },
+                {
+                    $set: {
+                        status: 'failed',
+                        updatedAt: new Date()
+                    }
+                }
+            );
+            isCrawling = false;
+            currentTask = null;
+            return { ok: false, message: 'No NAVIGATE acknowledgement received from extension.', _id: command._id };
+        }
+
+        if (!navigateAck.ok) {
+            await jobsCollection.updateAsync(
+                { _id: command._id },
+                {
+                    $set: {
+                        status: 'failed',
+                        updatedAt: new Date()
+                    }
+                }
+            );
+            isCrawling = false;
+            currentTask = null;
+            return { ok: false, message: navigateAck.error ?? 'NAVIGATE failed in extension.', _id: command._id };
         }
 
         await jobsCollection.updateAsync(
@@ -95,50 +111,69 @@ export namespace WebCrawlerController {
             }
         );
 
-        const scrapeResponse = BrowserRepo.sendScrapeCommand({
-            _id: command._id,
-            command: 'SCRAPE_PAGE'
+        isCrawling = false;
+        currentTask = null;
+        return { ok: true, message: 'Navigation command sent.', _id: command._id };
+    }
+
+    export async function Start() {
+        if (isCrawling) {
+            return {
+                ok: false,
+                message: 'Crawler is already running.',
+                status: currentStatus()
+            };
+        }
+
+        stopSignal = false;
+
+        const job = await jobsCollection.findOneAsync({
+            workflow: { $ne: 'complete' },
+            url: { $exists: true, $ne: null }
         });
 
-        if (!scrapeResponse.ok) {
-            await jobsCollection.updateAsync(
-                { _id: command._id },
-                {
-                    $set: {
-                        status: 'failed',
-                        updatedAt: new Date()
-                    }
-                }
-            );
-            isRunning = false;
-            throw new Error(scrapeResponse.message);
+        if (!job?._id) {
+            return { ok: false, message: 'No pending jobs with a URL found.' };
         }
 
-        await waitForDownloadedStatus(command._id);
-        isRunning = false;
-        return { _id: command._id, status: 'downloaded' as const };
+        if (job.htmlPage) {
+            return { ok: true, message: 'Job already has HTML downloaded.', _id: job._id };
+        }
 
+        const navigateResult = await navigateByJob({ _id: job._id, url: job.url });
+        if (!navigateResult.ok) {
+            return {
+                ok: false,
+                message: `Navigate failed: ${navigateResult.message}`,
+                _id: job._id
+            };
+        }
 
+        const scrapeResult = await BrowserRepo.scrapeHtmlAndSave(job._id, 10000);
+        return {
+            ok: scrapeResult.ok,
+            message: scrapeResult.message,
+            _id: job._id
+        };
     }
 
 
-    function Stop() {
+    export function currentStatus() {
+        return {
+            isCrawling,
+            currentTask,
+            current_id
+        };
+    }
+    export function Stop() {
         stopSignal = true;
+        isCrawling = false;
+        currentTask = null;
+        return currentStatus();
 
     }
 
-    async function CrawlerLoop() {
-        if (stopSignal) {
-            console.log('Web crawler stopping...');
-            isRunning = false;
-            return;
-        }
-    }
-
-
-
-
-
+  
    export  async function ProcessPage(pageData: ScrapePageCommand) {
         console.log(`Processing page: ${pageData.url}`);
         const analysis = await AnalizerRepo.AnalizePage(pageData);

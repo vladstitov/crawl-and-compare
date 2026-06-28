@@ -8,29 +8,29 @@ import type {
   NavigateCommand,
   ScrapePageCommand,
   ClickElementCommand,
-  EventLog
+  EventLog,
+  ExtensionSocketResponse
 } from '../../../shared/interfaces';
 
 export namespace BrowserRepo {
   let extensionSocket: WebSocket | null = null;
   let webSocketServer: WebSocketServer | null = null;
   let lastHeartbeatAt: number | null = null;
+  const commandResponses = new Map<string, ExtensionSocketResponse>();
 
   interface HeartbeatMessage {
     type: 'HEARTBEAT';
     timestamp: number;
   }
 
-  function isEventLog(value: EventLog): value is EventLog {
+  function isEventLog(value: unknown): value is EventLog {
     if (!value || typeof value !== 'object') {
       return false;
     }
 
+    const payload = value as Partial<EventLog>;
 
-    return (
-      (value.from === 'background' || value.from === 'content_script')
-
-    );
+    return payload.from === 'background' || payload.from === 'content_script';
   }
 
   function isHeartbeatMessage(value: unknown): value is HeartbeatMessage {
@@ -64,6 +64,68 @@ export namespace BrowserRepo {
     };
   }
 
+  function makeResponseKey(_id: string, command: BrowserCommandName): string {
+    return `${_id}:${command}`;
+  }
+
+  function isCommandName(value: unknown): value is BrowserCommandName {
+    return value === 'NAVIGATE' || value === 'SCRAPE_PAGE' || value === 'CLICK_ELEMENT';
+  }
+
+  async function setJobFailed(_id: string): Promise<void> {
+    await jobsCollection.updateAsync(
+      { _id },
+      {
+        $set: {
+          status: 'failed',
+          updatedAt: new Date()
+        }
+      }
+    );
+  }
+
+  async function waitForDownloadedStatus(_id: string, timeoutMs = 120000, pollMs = 1000): Promise<void> {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const doc = await jobsCollection.findOneAsync({ _id });
+
+      if (doc?.status === 'downloaded') {
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), pollMs);
+      });
+    }
+
+    throw new Error(`Timed out waiting for command ${_id} to reach status downloaded.`);
+  }
+
+  export async function waitForCommandResponse(
+    _id: string,
+    command: BrowserCommandName,
+    timeoutMs = 30000,
+    pollMs = 100
+  ): Promise<ExtensionSocketResponse | null> {
+    const key = makeResponseKey(_id, command);
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const response = commandResponses.get(key);
+      if (response) {
+        commandResponses.delete(key);
+        return response;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), pollMs);
+      });
+    }
+
+    return null;
+  }
+
   export function sendNavigateCommand(command: NavigateCommand): BridgeResponse {
     return sendCommand(command);
   }
@@ -72,25 +134,59 @@ export namespace BrowserRepo {
     return sendCommand(command);
   }
 
-  export function goToUrl(url: string): BridgeResponse {
+  export async function scrapeHtmlAndSave(_id: string, timeoutMs = 120000): Promise<BridgeResponse> {
+    const scrapeResponse = sendScrapeCommand({
+      _id,
+      command: 'SCRAPE_PAGE'
+    });
+
+    if (!scrapeResponse.ok) {
+      await setJobFailed(_id);
+      return { ok: false, message: scrapeResponse.message };
+    }
+
+    const scrapeAck = await waitForCommandResponse(_id, 'SCRAPE_PAGE');
+    if (!scrapeAck) {
+      await setJobFailed(_id);
+      return { ok: false, message: 'No SCRAPE_PAGE acknowledgement received from extension.' };
+    }
+
+    if (!scrapeAck.ok) {
+      await setJobFailed(_id);
+      return { ok: false, message: scrapeAck.error ?? 'SCRAPE_PAGE failed in extension.' };
+    }
+
+    try {
+      await waitForDownloadedStatus(_id, timeoutMs);
+      return { ok: true, message: 'Scrape completed and persisted in database.' };
+    } catch {
+      await jobsCollection.updateAsync(
+        { _id },
+        { $set: { status: 'timeout', updatedAt: new Date() } }
+      );
+      return { ok: false, message: `Timed out after ${timeoutMs}ms waiting for page data to be saved.` };
+    }
+  }
+
+  export function goToUrl(_id: string, url: string): BridgeResponse {
     return sendCommand({
-      _id: crypto.randomUUID(),
+      _id,
       command: 'NAVIGATE',
       url,
       waitForLoad: true
     });
   }
 
-  export function grabHtmlBody(): BridgeResponse {
+  export function grabHtmlBody(_id: string): BridgeResponse {
     return sendCommand({
-      _id: crypto.randomUUID(),
+      _id,
       command: 'SCRAPE_PAGE'
     });
   }
 
-  export function clickElement(selector: string): BridgeResponse {
+  export function clickElement(_id: string, selector: string): BridgeResponse {
     return sendCommand({
-      _id: crypto.randomUUID(),
+      _id,
       command: 'CLICK_ELEMENT',
       selector
     });
@@ -137,14 +233,34 @@ export namespace BrowserRepo {
 
         socket.on('message', (message) => {
           try {
-            const payload: any = JSON.parse(message.toString()) as Record<string, unknown>;
+            const payload = JSON.parse(message.toString()) as Record<string, unknown>;
 
             if (isHeartbeatMessage(payload)) {
               lastHeartbeatAt = payload.timestamp;
               return;
             }
 
+            if (isEventLog(payload)) {
+              console.log('Extension response:', payload);
+              return;
+            }
 
+            const _id = typeof payload._id === 'string' ? payload._id : undefined;
+            const command = isCommandName(payload.command) ? payload.command : undefined;
+            const ok = typeof payload.ok === 'boolean' ? payload.ok : undefined;
+
+            if (_id && command && typeof ok === 'boolean') {
+              commandResponses.set(
+                makeResponseKey(_id, command),
+                {
+                  ok,
+                  _id,
+                  command,
+                  data: payload.data,
+                  error: typeof payload.error === 'string' ? payload.error : undefined
+                }
+              );
+            }
 
             console.log('Extension response:', payload);
           } catch {

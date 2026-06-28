@@ -1,11 +1,18 @@
 export interface JobDocument extends Record<string, unknown> {
     _id?: string;
     reference: string;
+    name?: string;
     title: string;
     url: string;
     sourceName: string;
     htmlPage: string;
-    status: 'pending' | 'running' | 'completed' | 'failed';
+    htmlData: any;
+    hasTags: {
+        tag: string;
+        text: string;
+    }[];
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'downloaded' | 'timeout';
+    workflow?: string;
     createdAt?: Date;
     updatedAt?: Date;
 }

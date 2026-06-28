@@ -1,9 +1,29 @@
+import type { JobDocument } from '../core/database';
 export declare namespace AnalizerRepo {
-    interface AnalizePageResult {
-        url: string;
-        htmlSizeInBytes: number;
-        isLinkedInProfile: boolean;
-        nextAction: 'NONE' | 'OPEN_ABOUT_SECTION';
+    interface PageContainsRule {
+        tag: string;
+        text: string;
     }
-    function AnalizePage(url: string, html: string): Promise<AnalizePageResult>;
+    interface HtmlJsonNode {
+        type: 'element' | 'text';
+        tag?: string;
+        attributes?: Record<string, string>;
+        text?: string;
+        children?: HtmlJsonNode[];
+    }
+    interface ParsedHtmlJson {
+        title: string | null;
+        links: string[];
+        headings: string[];
+        rootNodes: HtmlJsonNode[];
+    }
+    type AnalizePageResult = Partial<JobDocument>;
+    function ParseHtmlToJson(html: string): ParsedHtmlJson | null;
+    function AnalizePage(data: {
+        _id: string;
+        url?: string;
+        title?: string;
+        sourceName?: string;
+        html?: string;
+    }, pageContains?: PageContainsRule[]): Promise<AnalizePageResult>;
 }
