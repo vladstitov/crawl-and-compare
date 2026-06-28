@@ -72,12 +72,13 @@ export namespace BrowserRepo {
     return value === 'NAVIGATE' || value === 'SCRAPE_PAGE' || value === 'CLICK_ELEMENT';
   }
 
-  async function setJobFailed(_id: string): Promise<void> {
+  async function setJobFailed(_id: string, statusMassage: string): Promise<void> {
     await jobsCollection.updateAsync(
       { _id },
       {
         $set: {
           status: 'failed',
+          statusMassage,
           updatedAt: new Date()
         }
       }
@@ -135,24 +136,30 @@ export namespace BrowserRepo {
   }
 
   export async function scrapeHtmlAndSave(_id: string, timeoutMs = 120000): Promise<BridgeResponse> {
+    const job = await jobsCollection.findOneAsync({ _id });
+    const currentUrl = typeof job?.url === 'string' ? job.url : 'unknown';
+
     const scrapeResponse = sendScrapeCommand({
       _id,
       command: 'SCRAPE_PAGE'
     });
 
     if (!scrapeResponse.ok) {
-      await setJobFailed(_id);
+      await setJobFailed(_id, `current url ${currentUrl}. SCRAPE_PAGE command was not sent: ${scrapeResponse.message}`);
       return { ok: false, message: scrapeResponse.message };
     }
 
     const scrapeAck = await waitForCommandResponse(_id, 'SCRAPE_PAGE');
     if (!scrapeAck) {
-      await setJobFailed(_id);
+      await setJobFailed(_id, `current url ${currentUrl}. SCRAPE_PAGE acknowledgement was not received from extension.`);
       return { ok: false, message: 'No SCRAPE_PAGE acknowledgement received from extension.' };
     }
 
     if (!scrapeAck.ok) {
-      await setJobFailed(_id);
+      await setJobFailed(
+        _id,
+        `current url ${currentUrl}. SCRAPE_PAGE failed in extension: ${scrapeAck.error ?? 'Unknown error'}.`
+      );
       return { ok: false, message: scrapeAck.error ?? 'SCRAPE_PAGE failed in extension.' };
     }
 
@@ -162,7 +169,13 @@ export namespace BrowserRepo {
     } catch {
       await jobsCollection.updateAsync(
         { _id },
-        { $set: { status: 'timeout', updatedAt: new Date() } }
+        {
+          $set: {
+            status: 'timeout',
+            statusMassage: `current url ${currentUrl}. send command SCRAPE_PAGE pageHtml not populated after ${Math.floor(timeoutMs / 1000)} sec`,
+            updatedAt: new Date()
+          }
+        }
       );
       return { ok: false, message: `Timed out after ${timeoutMs}ms waiting for page data to be saved.` };
     }
@@ -212,6 +225,7 @@ export namespace BrowserRepo {
             $set: {
               ...analysis,
               status: 'downloaded',
+              statusMassage: `current url ${analysis.url ?? 'unknown'}. SCRAPE_PAGE succeeded and pageHtml populated.`,
               updatedAt: new Date()
             }
           }

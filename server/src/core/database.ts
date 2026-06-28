@@ -11,6 +11,7 @@ export interface JobDocument extends Record<string, unknown> {
   htmlData: any;
   hasTags: {tag: string, text: string}[];
   status: 'pending' | 'running' | 'completed' | 'failed' | 'downloaded' | 'timeout';
+  statusMassage?: string | null;
   workflow?: string;
   createdAt?: Date;
   updatedAt?: Date;

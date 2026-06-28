@@ -25,6 +25,7 @@ app.post('/api/create-task', async (req: Request, res: Response) => {
               htmlData: null,
               hasTags: task.hasTags,
               status: null,
+                statusMassage: null,
               workflow: task.workflow,
               createdAt: new Date(),
               updatedAt: new Date()

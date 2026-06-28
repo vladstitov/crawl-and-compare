@@ -43,6 +43,7 @@ var WebCrawlerController;
             await database_1.jobsCollection.updateAsync({ _id: command._id }, {
                 $set: {
                     status: 'failed',
+                    statusMassage: `current url ${job.url}. NAVIGATE command was not sent: ${navigateResponse.message}`,
                     updatedAt: new Date()
                 }
             });
@@ -55,6 +56,7 @@ var WebCrawlerController;
             await database_1.jobsCollection.updateAsync({ _id: command._id }, {
                 $set: {
                     status: 'failed',
+                    statusMassage: `current url ${job.url}. NAVIGATE acknowledgement was not received from extension.`,
                     updatedAt: new Date()
                 }
             });
@@ -66,6 +68,7 @@ var WebCrawlerController;
             await database_1.jobsCollection.updateAsync({ _id: command._id }, {
                 $set: {
                     status: 'failed',
+                    statusMassage: `current url ${job.url}. NAVIGATE failed in extension: ${navigateAck.error ?? 'Unknown error'}.`,
                     updatedAt: new Date()
                 }
             });
@@ -76,6 +79,7 @@ var WebCrawlerController;
         await database_1.jobsCollection.updateAsync({ _id: command._id }, {
             $set: {
                 status: 'running',
+                statusMassage: `current url ${job.url}. NAVIGATE completed, waiting for SCRAPE_PAGE.`,
                 updatedAt: new Date()
             }
         });
